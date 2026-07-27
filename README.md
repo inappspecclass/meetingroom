@@ -83,7 +83,9 @@ Useful CLI commands:
 PROPOSE → LINT SPEC → HUMAN REVIEW → IMPLEMENT → VERIFY → GATED MERGE → ARCHIVE
 ```
 
-`AGENTS.md` §1 is the authoritative version. Here it is with the commands.
+`AGENTS.md` §1 is the authoritative version. Here it is with the commands. It is
+a loop, not a line — when a requirement moves you re-enter it rather than patch
+around it. See §8.
 
 ### Phase 1 — Propose
 
@@ -269,7 +271,123 @@ concurrency. A flaky race test means the system is broken. Escalate it.
 
 ---
 
-## 8. Your first day
+## 8. When requirements or the solution change
+
+They will. **Specs changing is expected, not a failure** — artifact #1 is graded
+partly on showing at least one mid-week spec revision. What fails is a spec and
+a codebase that quietly disagree.
+
+The rule underneath all four cases below: **change the spec first, then the
+code. Never the other way round, and never both silently.**
+
+### Case A — the change is still in flight (not yet archived)
+
+You are mid-implementation and discover the requirement was wrong, incomplete,
+or the customer moved.
+
+1. **Stop implementing.** Do not "just finish this bit first."
+2. Run `/opsx:update` to revise the artifacts, keeping `proposal.md`,
+   `specs/`, `design.md` and `tasks.md` coherent with each other.
+3. Re-run the Phase 2 self-lint and `openspec validate <change-id>`.
+4. **If the approved scope moved, go back to Phase 3 and get approval again.**
+   Tightening a scenario is not a scope change. Adding a capability is.
+5. Record it in `docs/decision-log.md`: what changed, what triggered it, what
+   it cost.
+6. Update `docs/evals.md` — a changed acceptance criterion means a changed eval.
+7. Resume `/opsx:apply`.
+
+**Commit the revision as its own commit.** Do not amend or force-push over the
+commit that held the old spec. The revision trail is the deliverable; erasing it
+destroys the thing being graded.
+
+### Case B — the change is already archived
+
+The requirement now lives in `openspec/specs/<capability>/spec.md`.
+
+**Never hand-edit `openspec/specs/`.** Those files are the merged output of
+archived changes. Editing them directly breaks the audit chain, and the next
+`/opsx:sync` may overwrite you.
+
+Instead, raise a **new change** with a delta against the existing spec, and run
+the full loop from Phase 1. Four delta operations are available:
+
+```markdown
+## ADDED Requirements
+### Requirement: <new thing>
+...
+
+## MODIFIED Requirements
+### Requirement: Atomic slot allocation
+<the COMPLETE revised requirement — header, body, and every scenario>
+
+## REMOVED Requirements
+### Requirement: <name>
+Reason: <why it is going away>
+
+## RENAMED Requirements
+- FROM: `### Requirement: Slot locking`
+- TO: `### Requirement: Atomic slot allocation`
+```
+
+Two rules people get wrong:
+
+- **`MODIFIED` is a replacement, not a diff.** The entire requirement block gets
+  swapped for what you write, so include every scenario you still want — the
+  ones you leave out are deleted.
+- **Renaming is `RENAMED`, not remove-plus-add.** And any `MODIFIED` in the same
+  change must reference the *new* name.
+
+If the change alters stored data or live behaviour — a stricter overlap rule
+applied to bookings that already exist, say — the proposal must state what
+happens to existing records. Migration is part of the change, not a follow-up.
+
+### Case C — the code and the spec disagree
+
+Found in review, or found later by the CI drift check.
+
+**Flag it. Do not silently pick one.** The spec is the source of truth, but
+"source of truth" means it has to be *made* true, deliberately:
+
+| What is actually wrong | What you do |
+|---|---|
+| The code is wrong | Fix the code under the existing spec. No delta needed. |
+| The spec is wrong and the built behaviour is correct | Raise a `MODIFIED` delta that documents reality, with the reason in the Decision Log. |
+| Nobody is sure which is right | Escalate to a human. This is a requirements question, not a coding one. |
+
+What you never do is leave them disagreeing, or edit whichever one is more
+convenient to reach.
+
+### Case D — the requirement holds, but the solution changes
+
+You swap an in-process lock for a database exclusion constraint. Same behaviour,
+different mechanism.
+
+- If a requirement names the mechanism — and here it does, because the spec says
+  the no-overlap rule is enforced **at the storage layer** — then this *is* a
+  spec change. Use Case B.
+- If no requirement names it, the requirement stays put but `design.md` must
+  still record the new decision and the alternative rejected. Design decisions
+  in an archived change folder are frozen, so a post-archive mechanism swap
+  needs a new change to carry the new `design.md`.
+- Either way, **re-run the race and invariant evals and record the new pass
+  rates.** A mechanism swap invalidates the evidence, not just the code.
+
+### Checklist for any post-implementation change
+
+- [ ] Spec updated before code — in-flight via `/opsx:update`, archived via a new change
+- [ ] `openspec/specs/` never hand-edited
+- [ ] `MODIFIED` blocks contain the complete requirement, every scenario included
+- [ ] Re-approved by a human if the scope moved
+- [ ] `docs/decision-log.md` — what changed and why
+- [ ] `docs/evals.md` — criteria and evals updated, pass rates re-recorded
+- [ ] `docs/guardrails.md` — updated if the risk set changed
+- [ ] `docs/prompt-journal.md` — still being logged live
+- [ ] Verification map regenerated; no scenario left unmapped
+- [ ] Revision committed as its own commit, history not rewritten
+
+---
+
+## 9. Your first day
 
 1. Read this file, then `CLAUDE.md`, then `AGENTS.md`.
 2. Install and run `openspec init` if the folder is not there yet.
@@ -281,7 +399,7 @@ concurrency. A flaky race test means the system is broken. Escalate it.
 
 ---
 
-## 9. Stop and ask a human when
+## 10. Stop and ask a human when
 
 - A gate fails twice on the same finding after honest fixes.
 - The spec is ambiguous, or two requirements contradict each other.
