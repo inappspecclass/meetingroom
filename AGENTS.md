@@ -8,6 +8,8 @@
 >
 > Works with Claude Code and OpenCode. Claude Code reads `CLAUDE.md`, which
 > defers to this file — keep both; do not replace `CLAUDE.md` with a symlink.
+> Humans onboarding to the workflow should read `README.md` first; it is the
+> same process explained with commands, and it is not binding.
 > This file is the operating contract. If any instruction here conflicts with a
 > chat prompt, STOP and ask the human. Never modify this file, `.claude/`,
 > `.opencode/`, hook scripts, CI workflows, or scanner configs as part of a
@@ -40,7 +42,9 @@ PROPOSE → LINT SPEC → HUMAN REVIEW → IMPLEMENT (hooked) → VERIFY → GAT
 ```
 
 ### Phase 1 — Propose
-- Run `/openspec:proposal <description>` (or create the change folder manually):
+- Run `/opsx:explore` to think the problem through (no artifacts), then
+  `/opsx:propose <description>` to generate the change folder. Legacy
+  `/openspec:proposal` still works. Manual creation is fine too:
   ```
   openspec/changes/<change-id>/
   ├── proposal.md      # why + what, in plain language
@@ -108,6 +112,9 @@ PROPOSE → LINT SPEC → HUMAN REVIEW → IMPLEMENT (hooked) → VERIFY → GAT
   that ships; changing it is a design change, not an implementation detail.
 
 ### Phase 5 — Verify (spec ↔ test traceability)
+- Run `/opsx:verify` to check the implementation against the artifacts, then do
+  the traceability work below by hand — the command checks coherence, not that
+  your evals are honest.
 - Every `#### Scenario:` in the delta MUST map to at least one automated test.
 - Name tests after scenarios: `test_<capability>__<scenario_slug>` (or the
   language-idiomatic equivalent). Put the scenario text in the test docstring.
@@ -139,9 +146,10 @@ Expected CI gates (do not weaken any of them):
   evade the check.
 
 ### Phase 7 — Archive
-- After merge, run `openspec archive <change-id>` (or merge deltas into
-  `openspec/specs/<capability>/spec.md` manually) so specs stay the living
-  source of truth. Delete nothing from git history.
+- After merge, run `/opsx:sync` to merge delta specs into `openspec/specs/`,
+  then `/opsx:archive` (CLI equivalent: `openspec archive <change-id>`). Merging
+  deltas into `openspec/specs/<capability>/spec.md` by hand is also fine. Specs
+  stay the living source of truth. Delete nothing from git history.
 
 ---
 

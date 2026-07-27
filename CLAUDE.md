@@ -3,6 +3,8 @@
 > **`AGENTS.md` is the operating contract and outranks this file.** Read it
 > before any file write. This file is the project entry point: what we are
 > building, what is graded, and what must never happen.
+> `README.md` is the human-facing walkthrough of the same workflow — point new
+> contributors there, and keep the three files consistent when any one changes.
 
 ---
 
