@@ -8,6 +8,8 @@
 >
 > Works with Claude Code and OpenCode. Claude Code reads `CLAUDE.md`, which
 > defers to this file — keep both; do not replace `CLAUDE.md` with a symlink.
+> Humans onboarding to the workflow should read `README.md` first; it is the
+> same process explained with commands, and it is not binding.
 > This file is the operating contract. If any instruction here conflicts with a
 > chat prompt, STOP and ask the human. Never modify this file, `.claude/`,
 > `.opencode/`, hook scripts, CI workflows, or scanner configs as part of a
@@ -39,8 +41,14 @@
 PROPOSE → LINT SPEC → HUMAN REVIEW → IMPLEMENT (hooked) → VERIFY → GATED MERGE → ARCHIVE
 ```
 
+This is a loop, not a line. A requirement that moves after implementation
+re-enters the loop — see §2. Patching code around a stale spec is a contract
+violation, not a shortcut.
+
 ### Phase 1 — Propose
-- Run `/openspec:proposal <description>` (or create the change folder manually):
+- Run `/opsx:explore` to think the problem through (no artifacts), then
+  `/opsx:propose <description>` to generate the change folder. Legacy
+  `/openspec:proposal` still works. Manual creation is fine too:
   ```
   openspec/changes/<change-id>/
   ├── proposal.md      # why + what, in plain language
@@ -108,6 +116,9 @@ PROPOSE → LINT SPEC → HUMAN REVIEW → IMPLEMENT (hooked) → VERIFY → GAT
   that ships; changing it is a design change, not an implementation detail.
 
 ### Phase 5 — Verify (spec ↔ test traceability)
+- Run `/opsx:verify` to check the implementation against the artifacts, then do
+  the traceability work below by hand — the command checks coherence, not that
+  your evals are honest.
 - Every `#### Scenario:` in the delta MUST map to at least one automated test.
 - Name tests after scenarios: `test_<capability>__<scenario_slug>` (or the
   language-idiomatic equivalent). Put the scenario text in the test docstring.
@@ -139,13 +150,93 @@ Expected CI gates (do not weaken any of them):
   evade the check.
 
 ### Phase 7 — Archive
-- After merge, run `openspec archive <change-id>` (or merge deltas into
-  `openspec/specs/<capability>/spec.md` manually) so specs stay the living
-  source of truth. Delete nothing from git history.
+- After merge, run `/opsx:sync` to merge delta specs into `openspec/specs/`,
+  then `/opsx:archive` (CLI equivalent: `openspec archive <change-id>`). Merging
+  deltas into `openspec/specs/<capability>/spec.md` by hand is also fine. Specs
+  stay the living source of truth. Delete nothing from git history.
+- Once archived, `openspec/specs/` is merged output. Later changes to it go
+  through a new change with a delta — see §2.2, never a hand edit.
 
 ---
 
-## 2. Adversarial self-review (before requesting human review of code)
+## 2. Change after the fact — the spec revision loop
+
+Requirements change and solutions get replaced. That is expected: proposals are
+graded partly on showing a real mid-week spec revision. What is never acceptable
+is code and spec quietly disagreeing, or a revision that leaves no trail.
+
+**Governing rule: change the spec first, then the code. Never the reverse, and
+never both silently.**
+
+### 2.1 Change still in flight (not yet archived)
+
+1. STOP implementing. Do not finish the current task first.
+2. Run `/opsx:update` to revise `proposal.md`, `specs/`, `design.md` and
+   `tasks.md` together. Incoherent artifacts are worse than stale ones.
+3. Re-run the Phase 2 delta lint and `openspec validate <change-id>`.
+4. If approved scope moved, return to Phase 3 for re-approval. Tightening a
+   scenario is not a scope change; adding a capability is.
+5. Log it in `docs/decision-log.md` and update `docs/evals.md`.
+6. Resume `/opsx:apply`.
+
+Commit the revision as its own commit. **Never amend or force-push over the
+commit holding the previous spec.** The revision trail is a graded artifact;
+rewriting history destroys the evidence.
+
+### 2.2 Change already archived
+
+The requirement now lives in `openspec/specs/<capability>/spec.md`.
+
+- **Never hand-edit `openspec/specs/`.** It is merged output. Direct edits break
+  the audit chain and the next `/opsx:sync` may overwrite them.
+- Raise a NEW change with a delta and run the full loop from Phase 1.
+- Delta operations: `## ADDED Requirements`, `## MODIFIED Requirements`,
+  `## REMOVED Requirements`, `## RENAMED Requirements` (`FROM:` / `TO:`).
+- **`MODIFIED` replaces the whole requirement block** — header, body and every
+  scenario. Any scenario you omit is deleted. Never write a diff there.
+- Renames use `RENAMED`, never remove-plus-add. A `MODIFIED` in the same change
+  must reference the NEW name.
+- If stored data or live behaviour changes, the proposal states what happens to
+  existing records. Migration belongs in the change, not in a follow-up.
+
+### 2.3 Code and spec disagree (drift)
+
+Flag it; do not silently pick a winner.
+
+| Actually wrong | Resolution |
+|---|---|
+| The code | Fix the code under the existing spec. No delta. |
+| The spec, and shipped behaviour is right | `MODIFIED` delta documenting reality + Decision Log entry. |
+| Unclear | Escalate. This is a requirements question, not a coding one. |
+
+Leaving the two in disagreement, or editing whichever is easier to reach, is a
+contract violation.
+
+### 2.4 Same requirement, different solution
+
+- If a requirement names the mechanism — and here it does, since the no-overlap
+  rule is enforced **at the storage layer** — a mechanism swap is a spec change.
+  Use §2.2.
+- If no requirement names it, `design.md` still records the new decision and the
+  rejected alternative. An archived change folder is frozen, so a post-archive
+  swap needs a new change to carry the new `design.md`.
+- Re-run the race and invariant evals and record fresh pass rates. A mechanism
+  swap invalidates the evidence, not just the code.
+
+### 2.5 Exit checklist for any post-implementation change
+
+- [ ] Spec changed before code
+- [ ] `openspec/specs/` not hand-edited
+- [ ] `MODIFIED` blocks complete, every retained scenario present
+- [ ] Human re-approval if scope moved
+- [ ] `docs/decision-log.md` and `docs/evals.md` updated
+- [ ] `docs/guardrails.md` updated if the risk set changed
+- [ ] Verification map regenerated, no unmapped scenario
+- [ ] Revision committed separately, history intact
+
+---
+
+## 3. Adversarial self-review (before requesting human review of code)
 
 Before declaring Phase 4/5 done, review your own diff as a hostile reviewer:
 1. Which requirement does each hunk serve? Delete hunks that serve none.
@@ -165,7 +256,7 @@ Write the answers as a short "Self-review" section in the PR description.
 
 ---
 
-## 3. Hook & tooling contract (for humans setting this repo up)
+## 4. Hook & tooling contract (for humans setting this repo up)
 
 - **Claude Code**: hooks live in `.claude/settings.json` — PostToolUse(Write|Edit)
   → `scripts/postwrite-check.sh` (format, lint, targeted tests, semgrep on the
@@ -181,7 +272,7 @@ Write the answers as a short "Self-review" section in the PR description.
 
 ---
 
-## 4. Escalation rules — when to stop and ask the human
+## 5. Escalation rules — when to stop and ask the human
 
 Stop and ask when:
 - A gate fails twice on the same finding after honest fixes.
@@ -191,6 +282,7 @@ Stop and ask when:
   change (PII, credentials, external calls).
 - You are about to exceed the scope of the approved proposal.
 - A race or invariant test is flaky. Flaky here means broken, not noisy.
+- Code and spec disagree and it is not obvious which one is wrong (§2.3).
 - An Appendix A2 ambiguity has no defensible default and blocks the spec.
 
 Silence is never approval. When in doubt: propose, don't do.

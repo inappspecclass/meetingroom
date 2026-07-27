@@ -3,6 +3,8 @@
 > **`AGENTS.md` is the operating contract and outranks this file.** Read it
 > before any file write. This file is the project entry point: what we are
 > building, what is graded, and what must never happen.
+> `README.md` is the human-facing walkthrough of the same workflow — point new
+> contributors there, and keep the three files consistent when any one changes.
 
 ---
 
@@ -83,6 +85,10 @@ Three of these have a specific failure mode the graders look for:
 4. **Deterministic gates outrank agent judgment.** A failing linter, test, or
    scanner gets fixed or escalated — never suppressed.
 5. **One OpenSpec change = one capability delta.**
+6. **When a requirement or the solution changes, change the spec first.**
+   In-flight change → `/opsx:update` and re-approve if scope moved. Already
+   archived → a new change with `MODIFIED` / `REMOVED` / `RENAMED` deltas.
+   `openspec/specs/` is never hand-edited. Full loop in `AGENTS.md` §2.
 
 ---
 
@@ -124,6 +130,12 @@ to prevent.
   without written human approval in the PR.
 - Do not resolve a spec ambiguity silently — record it in the Decision Log.
 - Do not report a change complete while any scenario lacks a mapped test.
+- Do not hand-edit `openspec/specs/` — raise a delta in a new change instead.
+- Do not write a `MODIFIED` block as a diff. It replaces the whole requirement,
+  so any scenario you omit is deleted.
+- Do not amend or force-push over a commit that holds a superseded spec. The
+  revision trail is graded evidence.
+- Do not let code and spec disagree. Fix one, deliberately, and say which.
 
 ---
 
