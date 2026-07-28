@@ -108,6 +108,39 @@ Do not manufacture failures — but do not hide them either.
   not a confident resolution.** An agent's willingness to invent a plausible
   answer is the failure mode this whole process exists to contain.
 
+### 6. Team overrides the write path to Edge Functions
+
+- **Date:** 2026-07-28
+- **Prompt (gist):** three decisions put to the team; the write path came back as
+  **Supabase Edge Functions (Deno)**, against the agent's Node recommendation.
+- **Output:** design revised — Edge Functions replace Fastify.
+- **Wrong because:** the agent's stated reason for preferring Node was that a race
+  test "needs a real HTTP surface to hammer." **That argument was simply wrong** —
+  an Edge Function is a URL, and the race suite fires N concurrent `POST`s at it
+  identically. The recommendation was defended with a technical claim that did not
+  survive ten seconds of inspection once challenged.
+- **Fix:** recorded the override in ADR-002 including *why the agent's reasoning
+  was faulty*, not just what changed. Rewrote `design.md`, retargeted 19 tasks.
+- **Second-order discovery:** the override exposed a real problem the agent had not
+  considered under either option. **`supabase-js` has no multi-statement
+  transaction.** The spec requires an audit event to be written in the same
+  transaction as its state change, and two client calls can commit a booking and
+  lose the event. The transactional unit had to move into Postgres as plpgsql
+  functions (ADR-010).
+- **Kept:** two lessons, and the second is the valuable one.
+  1. **A recommendation is not a conclusion.** The agent produced a confident
+     technical justification for a preference. Being asked to defend it revealed it
+     was decoration.
+  2. **The spec caught what the runtime change hid.** Because "audit event in the
+     same transaction" was already written down as a requirement, changing the
+     runtime forced the transaction question into the open. Without that
+     requirement in writing, this ships as a rare missing-audit-event bug that
+     nobody reproduces. **This is the single clearest instance so far of the spec
+     doing work no code review would have done.**
+- **Also worth noting:** requirements did not change, so no delta was needed — only
+  `design.md` and `tasks.md`. That is Case A / Case D of `AGENTS.md` §2 running for
+  real, on day one, rather than as a documented hypothetical.
+
 ---
 
 ## Running observations
@@ -116,8 +149,8 @@ Patterns worth carrying into the Learnings Memo:
 
 1. **The agent's failures were never syntax; they were unverified confidence.**
    The legacy slash command, the invented config schema, the "all in Supabase"
-   contradiction — each would have produced working-looking output containing a
-   false claim.
+   contradiction, the race-test-needs-HTTP argument — each would have produced
+   working-looking output containing a false claim. Four for four.
 2. **The spec caught what review would have missed.** Writing GIVEN/WHEN/THEN for
    back-to-back bookings forced the half-open interval decision into the open. In
    a code-first build that decision gets made by whichever comparison operator

@@ -12,19 +12,20 @@ takes, not a claim that anything has run.
 
 | Class | Suite | Tests | Passed | Failed | Notes |
 |---|---|---|---|---|---|
-| Race | `tests/race` | — | — | — | N ∈ {2, 5, 20}, 50 iterations each |
-| Race (API bypassed) | `tests/race` | — | — | — | Direct Postgres inserts |
+| Race | `tests/race` | — | — | — | Through the `bookings` Edge Function. N ∈ {2, 5, 20}, 50 iterations each |
+| Race (function bypassed) | `tests/race` | — | — | — | Direct raw Postgres inserts |
+| Race (`book_room` direct) | `tests/race` | — | — | — | Concurrent RPC calls — proves the plpgsql wrapper added no check-then-act window |
 | Invariant | `tests/property` | — | — | — | ≥500 generated sequences |
 | Boundary | `tests/boundary` | — | — | — | Table-driven, exact error codes |
-| Audit | `tests/audit` | — | — | — | Exact event counts |
-| Unit | `apps/api`, `packages/shared` | — | — | — | |
+| Audit | `tests/audit` | — | — | — | Exact event counts, plus forced mid-function failure |
+| Unit | `supabase/functions` (`deno test`), `packages/shared` (Vitest) | — | — | — | Two runtimes, two runners |
 | **Total** | | **—** | **—** | **—** | |
 
 ## Metrics
 
 | Metric | Value | Target |
 |---|---|---|
-| Line coverage, `apps/api` | — | ≥80% |
+| Line coverage, `supabase/functions` | — | ≥80% |
 | Line coverage, `packages/shared` | — | ≥90% |
 | Scenarios in delta specs | 39 | — |
 | Scenarios with a mapped test | — | 39 |

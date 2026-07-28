@@ -30,6 +30,8 @@ Scope: `establish-booking-platform`. Rows are added as later changes land.
 | G-12 | An event exists with no actor | `outcome = 'success'` rows must name an actor | `test_audit__one_event_per_create` asserts a non-null actor |
 | G-13 | History and state drift apart | Reconciliation: state is rebuilt from the log and compared | `test_audit__replay_matches_state` |
 | G-14 | Editing a booking makes "who booked this" ambiguous | No edit route exists; change is cancel plus rebook (ADR-004) | `test_booking_lifecycle__no_edit_route` |
+| G-28 | A booking commits but its audit event is lost, because `supabase-js` has no transaction | Booking and audit insert share one plpgsql function body — a single implicit transaction (ADR-010) | `test_audit__rollback_leaves_no_event` — forces a mid-function failure and asserts neither row exists |
+| G-29 | A future `EXCEPTION` block in `book_room` silently discards the audit insert while "handling" the conflict | No `EXCEPTION` block; `23P01` propagates to the caller by design | `test_conflict__rejection_audited` (the rejection event must come from the separate `log_rejection` call, not from inside `book_room`) |
 
 ## Authorisation and data exposure
 
@@ -37,7 +39,8 @@ Scope: `establish-booking-platform`. Rows are added as later changes land.
 |---|---|---|---|
 | G-15 | A user cancels someone else's booking | Permission check: creator or admin only; admin action separately flagged | `test_booking_lifecycle__cancel_other_forbidden`, `test_booking_lifecycle__admin_cancel_flagged` |
 | G-16 | The browser writes bookings directly using the anon key | RLS enabled with read policies only; no write policy for `authenticated`, and RLS denies by default | `test_room_inventory__anon_cannot_list` plus an RLS assertion that an anon insert into `bookings` fails |
-| G-17 | The service-role key leaks into the frontend bundle | Build check greps the web bundle for the key and fails the build | Build-time check in CI (task 3.2) |
+| G-17 | The service-role key leaks into the frontend bundle | Build check greps the web bundle for the key and fails the build | Build-time check in CI (task 4.2) |
+| G-30 | The browser calls `book_room` directly via RPC and bypasses every validation rule | `security definer` with pinned `search_path`; `execute` granted to `service_role` only, never `authenticated` | `test_rpc__authenticated_cannot_call_book_room` (task 2.6) |
 | G-18 | A conflict response leaks who holds the slot | The `409` body names the interval, never the other user | `test_conflict__identical_slot_409` asserts no user identifier in the body |
 | G-19 | Secrets committed | `.env*` git-ignored; gitleaks/trufflehog in pre-commit | Pre-commit secrets scan |
 

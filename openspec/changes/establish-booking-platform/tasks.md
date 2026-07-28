@@ -12,7 +12,9 @@ before starting the next task.
 
 - [ ] 0.1 Run `openspec init` to generate `openspec/config.yaml` and wire the
       slash commands. The folder structure already exists; `init` should adopt it.
-- [ ] 0.2 Install the Supabase CLI and run `supabase start` for a local stack.
+- [ ] 0.2 Install the Supabase CLI and run `supabase start` for a local stack,
+      plus `supabase functions serve` so the race suite has a local endpoint.
+      Install Deno for `deno test`.
 - [ ] 0.3 Create the Supabase project for staging. Record the project ref in the
       Decision Log, not in this file.
 - [ ] 0.4 Confirm `.env.example` exists and that `.env*` is git-ignored.
@@ -37,63 +39,88 @@ before starting the next task.
 **Gate:** tasks 1.1–1.10 must be green before any API code is written. The
 constraint is the product; the API is a wrapper.
 
-## 2. Shared contracts
+## 2. Transactional core (plpgsql)
 
-- [ ] 2.1 `packages/shared`: zod schema for the booking request, rejecting naive
+`supabase-js` has no multi-statement transaction, so atomicity lives in Postgres.
+See `design.md` §4.
+
+- [ ] 2.1 Migration: `book_room(p_room_id, p_actor, p_starts_at, p_ends_at)` —
+      inserts the booking and its audit event in one function body.
+- [ ] 2.2 **No `EXCEPTION` block in `book_room`.** Let `23P01` propagate; catching
+      it would roll back the audit insert too.
+- [ ] 2.3 Migration: `cancel_booking(p_booking_id, p_actor, p_is_admin)` —
+      conditional update plus audit event, one body.
+- [ ] 2.4 Migration: `log_rejection(...)` — append-only, called in its own
+      transaction after a failure.
+- [ ] 2.5 All three `security definer` with `set search_path = public, pg_temp`,
+      and `execute` granted to `service_role` only — never `authenticated`.
+- [ ] 2.6 Test that `authenticated` cannot call `book_room` directly.
+
+## 3. Shared contracts
+
+- [ ] 3.1 `packages/shared`: zod schema for the booking request, rejecting naive
       timestamps.
-- [ ] 2.2 `packages/shared`: the error-code union from `design.md` §5, as a type.
-- [ ] 2.3 Generate database types from the local Supabase schema.
+- [ ] 3.2 `packages/shared`: the error-code union from `design.md` §5, as a type.
+- [ ] 3.3 `deno.json` import map aliasing `zod` → `npm:zod`, so the same source
+      file resolves in both Vite and Deno.
+- [ ] 3.4 Generate database types from the local Supabase schema.
 
-## 3. Node API
+## 4. Edge Functions (Deno)
 
-- [ ] 3.1 Fastify app skeleton, health route, service-role client.
-- [ ] 3.2 Build check that fails if `SUPABASE_SERVICE_ROLE_KEY` appears in any
-      web bundle.
-- [ ] 3.3 Auth middleware resolving the Supabase JWT to an actor id and admin flag.
-- [ ] 3.4 `GET /rooms`.
-- [ ] 3.5 `POST /bookings` — validate, then a **single** insert. No pre-flight
-      overlap query.
-- [ ] 3.6 Map SQLSTATE `23P01` to `409 SLOT_TAKEN` including the conflicting
+- [ ] 4.1 `supabase/functions/_shared`: JWT helper resolving the Supabase token to
+      an actor id and admin flag; shared error responder.
+- [ ] 4.2 Build check that fails if `SUPABASE_SERVICE_ROLE_KEY` appears in any web
+      bundle.
+- [ ] 4.3 `bookings` function, `POST` create — validate, then a **single**
+      `rpc('book_room')`. No pre-flight overlap query.
+- [ ] 4.4 Map SQLSTATE `23P01` to `409 SLOT_TAKEN` including the conflicting
       interval, excluding the other booker's identity.
-- [ ] 3.7 Map every remaining condition in `design.md` §5 to its code.
-- [ ] 3.8 `POST /bookings/:id/cancel` — conditional update, permission check,
-      admin flag.
-- [ ] 3.9 Audit write inside the same transaction as each state change.
-- [ ] 3.10 Audit write for refusals, in its own transaction.
+- [ ] 4.5 On refusal, call `rpc('log_rejection')` in a separate transaction.
+- [ ] 4.6 Map every remaining condition in `design.md` §5 to its code.
+- [ ] 4.7 `bookings` function, cancel route — `rpc('cancel_booking')`, permission
+      check, admin flag.
+- [ ] 4.8 Set function secrets for `OFFICE_TIMEZONE` and `BOOKING_HORIZON_DAYS`.
+- [ ] 4.9 Confirm no Node built-in or native addon is imported anywhere in
+      `supabase/functions/`.
 
-## 4. React web
+## 5. React web
 
-- [ ] 4.1 Vite + TypeScript scaffold, Supabase auth session.
-- [ ] 4.2 Room list from Supabase directly, under RLS.
-- [ ] 4.3 Day view per room showing active bookings.
-- [ ] 4.4 Booking form posting to the Node API.
-- [ ] 4.5 Render every error code as a distinct message. `SLOT_TAKEN` must read
+- [ ] 5.1 Vite + TypeScript scaffold, Supabase auth session.
+- [ ] 5.2 Room list from Supabase directly, under RLS.
+- [ ] 5.3 Day view per room showing active bookings.
+- [ ] 5.4 Booking form posting to the `bookings` Edge Function.
+- [ ] 5.5 Render every error code as a distinct message. `SLOT_TAKEN` must read
       as "already booked", not as a generic failure.
-- [ ] 4.6 Cancel action, visible only where permitted.
+- [ ] 5.6 Cancel action, visible only where permitted.
 
-## 5. Tests — the graded part
+## 6. Tests — the graded part
 
-- [ ] 5.1 Boundary suite for every interval and overlap shape.
-- [ ] 5.2 Race suite through `POST /bookings`, N = 2, 5, 20, 50 iterations each.
-- [ ] 5.3 Race suite **bypassing the API**, firing concurrent inserts at Postgres.
-- [ ] 5.4 Property suite: random create/cancel sequences, then assert zero
+- [ ] 6.1 Boundary suite for every interval and overlap shape.
+- [ ] 6.2 Race suite through the `bookings` function, N = 2, 5, 20, 50 iterations
+      each.
+- [ ] 6.3 Race suite **bypassing the function**, firing concurrent raw inserts at
+      Postgres.
+- [ ] 6.4 Race suite firing concurrent `select book_room(...)` calls — proves the
+      transactional wrapper did not reintroduce a check-then-act window.
+- [ ] 6.5 Property suite: random create/cancel sequences, then assert zero
       overlapping active pairs by querying the store.
-- [ ] 5.5 Audit-completeness suite: one event per transition, no null actor on
-      success, `UPDATE`/`DELETE` raise, state rebuilds from the log.
-- [ ] 5.6 Permission suite for cancellation.
-- [ ] 5.7 Record every result and pass rate in `docs/evals.md`.
-- [ ] 5.8 Write `docs/test-report.md` with the summary table.
+- [ ] 6.6 Audit-completeness suite: one event per transition, no null actor on
+      success, `UPDATE`/`DELETE` raise, state rebuilds from the log, and a forced
+      mid-function failure leaves neither booking nor event.
+- [ ] 6.7 Permission suite for cancellation, plus the direct-`rpc` denial test.
+- [ ] 6.8 Record every result and pass rate in `docs/evals.md`.
+- [ ] 6.9 Write `docs/test-report.md` with the summary table.
 
-## 6. Artifacts before review
+## 7. Artifacts before review
 
-- [ ] 6.1 `docs/decision-log.md` current, including anything overridden during
+- [ ] 7.1 `docs/decision-log.md` current, including anything overridden during
       implementation.
-- [ ] 6.2 `docs/guardrails.md` — each entry as risk → guardrail → how tested,
+- [ ] 7.2 `docs/guardrails.md` — each entry as risk → guardrail → how tested,
       with the test name filled in.
-- [ ] 6.3 `docs/prompt-journal.md` — logged live, failures included.
-- [ ] 6.4 Verification map below completed, with real test names.
-- [ ] 6.5 Adversarial self-review (`AGENTS.md` §3) written into the PR body.
-- [ ] 6.6 Propose `scripts/verify-traceability.sh` in a **separate** PR — it
+- [ ] 7.3 `docs/prompt-journal.md` — logged live, failures included.
+- [ ] 7.4 Verification map below completed, with real test names.
+- [ ] 7.5 Adversarial self-review (`AGENTS.md` §3) written into the PR body.
+- [ ] 7.6 Propose `scripts/verify-traceability.sh` in a **separate** PR — it
       compares every `#### Scenario:` title in the delta specs against the
       verification map and fails on a mismatch. Scripts are policy surface
       (`AGENTS.md` §0.3), so it does not ride along with this change.

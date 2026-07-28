@@ -19,6 +19,10 @@ not wait until the last day; by then the interesting details are gone.
   complete, inventing a schema it had never seen.
 - Was asked for a "Node backend, all in Supabase" — a contradiction, since Edge
   Functions are Deno. Silently picking one was the easy path.
+- Defended its Node recommendation with a technical claim ("the race test needs a
+  real HTTP surface") that was false — an Edge Function is a URL. The
+  justification was decoration on a preference, and it took being overridden to
+  expose that.
 
 ## 2. Where the spec caught it
 
@@ -30,6 +34,14 @@ not wait until the last day; by then the interesting details are gone.
   someone typed first, and nobody ever states it.
 - Requiring "how it is tested" on every guardrail row exposed which risks we had
   named but could not actually verify.
+- **The strongest instance so far.** Changing the runtime from Node to Deno looked
+  like a deploy-target decision. Because the spec had already committed in writing
+  to "the audit event is written in the same transaction as its state change," the
+  change forced a question nobody had asked: `supabase-js` has no transaction. Two
+  client calls can commit a booking and lose its event. Without that requirement
+  written down, this ships as a rare missing-audit-event bug that nobody
+  reproduces. No code review would have caught it, because the code would have
+  looked correct.
 
 ## 3. What we would spec differently
 

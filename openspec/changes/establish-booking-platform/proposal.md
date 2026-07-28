@@ -3,6 +3,10 @@
 **Change ID:** `establish-booking-platform`
 **Capabilities touched:** `room-inventory`, `booking-lifecycle`, `conflict-resolution`
 **Status:** DRAFT — awaiting human review (Phase 3)
+**Revised:** 2026-07-28 — write path changed to Supabase Edge Functions after the
+team overrode the agent's Node recommendation (ADR-002). **No spec delta was
+needed:** the requirements name a guarantee, not a runtime, so all 39 scenarios
+stand. Scope did not move, so this does not re-enter Phase 3 twice.
 
 ---
 
@@ -69,7 +73,7 @@ inside it. Resolutions below become SHALL requirements in the spec deltas.
 | 8 | More than one process? | Yes, assumed. In-process locks are therefore rejected outright |
 | 9 | Which recurrence rules? | Deferred to `add-recurring-bookings`. Daily and weekly-by-weekday only when it lands |
 | 10 | Eager or lazy expansion? | Deferred. Design intent: eager, 90-day horizon |
-| 11 | One instance of a series conflicts? | Deferred. **Needs your decision — see open questions** |
+| 11 | One instance of a series conflicts? | **Book the remaining instances and report the skipped ones.** Settled now (ADR-009) so recurrence does not need a `MODIFIED` delta plus migration later |
 | 12 | Cancel instance vs series? | Deferred |
 | 13 | Timezone and DST? | Office is `Asia/Kolkata` (no DST). All timestamps stored `timestamptz`. Expansion logic still gets a DST test against a DST-observing zone — see ADR-005 |
 | 14 | Are rejected attempts audited? | **Yes.** A refused booking is the interesting event |
@@ -77,20 +81,24 @@ inside it. Resolutions below become SHALL requirements in the spec deltas.
 | 16 | Append-only enforced or convention? | **Enforced** — `REVOKE UPDATE, DELETE` plus a trigger that raises. Testable |
 | 17 | Is the audit log the source of truth? | No. `bookings` holds state, `audit_events` is the log. A reconciliation test proves state rebuilds from the log |
 
-## Open questions for you
+## Open questions — all three now settled
 
-Two items where an expert could reasonably go either way, and guessing would be
-expensive to reverse later:
+| Ref | Question | Resolution | How |
+|---|---|---|---|
+| ADR-002 | Node service, Edge Functions, or direct RPC? | **Supabase Edge Functions (Deno)** | Team **overrode** the agent's Node recommendation — one platform beats one runtime |
+| ADR-006 | Accept the three-capability bootstrap exception? | **Accepted** | Team confirmed |
+| A2 #11 | Series partial conflict behaviour? | **Book the rest, report the skip** | Team confirmed the agent's recommendation |
 
-1. **Series partial conflict (A2 #11).** A 12-week weekly series where week 7 is
-   already taken. Book the other 11 and report the skip, or refuse the whole
-   series? *Recommended: book the rest and report the skip* — refusing 11 good
-   bookings over 1 collision is worse for the user, and the report keeps it
-   honest. Reversing this later is a `MODIFIED` delta plus a data migration.
-2. **Write path (ADR-002).** Node service holding the service-role key, or
-   Postgres RPC called directly from React under RLS? *Recommended: Node
-   service* — you asked for a Node backend, and it gives the race test a real
-   HTTP surface to hammer. The invariant is enforced in the database either way.
+The ADR-002 override had one real consequence, which is now designed for rather
+than discovered later: **`supabase-js` has no multi-statement transaction.** Two
+separate calls could commit a booking and lose its audit event, silently breaking
+a `booking-lifecycle` requirement. The transactional unit therefore moved into
+Postgres — `book_room()` and `cancel_booking()` are plpgsql functions whose bodies
+are single transactions, invoked by RPC from the Edge Function. See `design.md` §4
+and ADR-010.
+
+Nothing about the invariant changed. It was a database constraint before the
+override and it is a database constraint after, which is why no delta was needed.
 
 ## Roadmap
 

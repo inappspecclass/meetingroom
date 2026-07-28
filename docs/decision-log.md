@@ -41,31 +41,51 @@ application code and the guarantee weakens. Say so out loud at that point.
 
 ---
 
-## ADR-002 — Node service owns all writes
+## ADR-002 — Supabase Edge Functions own all writes
 
-**Status:** AGENT-PROPOSED · **needs your decision** · 2026-07-28
+**Status:** **TEAM-OVERRODE** · 2026-07-28
 **Context:** "Backend Node.js, all in Supabase" contains a tension. Supabase Edge
 Functions run Deno, not Node. So "all in Supabase" and "Node backend" cannot both
-be fully true.
+be fully true. The agent surfaced the conflict rather than picking one silently.
 
 **Options considered**
 
 | Option | Trade |
 |---|---|
-| **Separate Node + Fastify service holding the service-role key** | Chosen. Real Node as asked. Gives the race test an HTTP surface. One more deploy target. |
-| Supabase Edge Functions (Deno) | Everything inside Supabase, but not Node. Revisit if a single deploy target matters more than the runtime. |
-| React → Postgres RPC directly under RLS | Fewest moving parts, but error-contract mapping ends up in plpgsql and the race test has no HTTP surface. |
+| Separate Node + Fastify service | **Agent proposed this.** Real Node as literally asked. One more deploy target, one more CI pipeline, one more secret store. |
+| **Supabase Edge Functions (Deno)** | **Team chose this.** Everything inside Supabase. TypeScript, but Deno rather than Node. |
+| React → Postgres RPC directly under RLS | Rejected by both. No server-side place to own the error contract, and the service-role boundary disappears. |
 
-**Decision:** Node + Fastify service. React reads directly from Supabase under
-RLS; all writes go through Node.
+**Agent proposed:** the Node service, on the grounds that the runtime was named
+explicitly and that a race test wants a real HTTP surface.
 
-**Why:** the runtime was specified explicitly, and the concurrency evidence is
-stronger when the race test hits the same path a user does. The invariant does not
-depend on this choice — the constraint holds even if Node is bypassed, which is
-itself a test (§7 class 2 of `design.md`).
+**Team overrode:** Edge Functions.
 
-**Reversal cost:** moderate. The API contract survives; the deploy target and auth
-plumbing change.
+**Why the team was right:** the HTTP-surface argument does not survive scrutiny —
+**an Edge Function is a URL.** The race suite fires N simultaneous `POST`s at it
+exactly as it would at Fastify, so the agent's main technical objection was
+misplaced. What remains is a straight trade of one runtime against one platform,
+and one platform is worth more: a single deploy, a single secret store, no second
+CI target, for a one-week scope. The word "Node" in the original request was a
+default, not a requirement.
+
+**What it actually cost, stated plainly**
+
+1. **Deno, not Node.** No Node built-ins, no native addons. Nothing in this scope
+   needs them. `npm:` specifiers cover the rest, and a `deno.json` import map lets
+   the shared zod schema read identically in Vite and Deno.
+2. **Cold starts on the write path.** Irrelevant for six rooms; no performance
+   claim is made either way.
+3. **The real one — no client-side transaction.** See ADR-010. This was not
+   obvious when the choice was made, and it is the reason the design changed shape
+   rather than just changing runtime.
+
+**Reversal cost:** low. The API contract and the entire transactional core are
+runtime-independent; only the HTTP wrapper would move.
+
+**Process note:** this is the shape a Decision Log entry is supposed to have —
+agent proposed, team overrode, and the agent's stated reason turned out to be
+wrong on inspection. Recording that is the point.
 
 ---
 
@@ -132,7 +152,7 @@ office in a DST zone would inherit a silent bug. We test the logic.
 
 ## ADR-006 — The bootstrap change touches three capabilities
 
-**Status:** AGENT-PROPOSED · **needs your sign-off** · 2026-07-28
+**Status:** **TEAM-CONFIRMED** · 2026-07-28
 **Context:** `AGENTS.md` §0.5 requires one change to equal one capability delta.
 `establish-booking-platform` touches `room-inventory`, `booking-lifecycle` and
 `conflict-resolution`.
@@ -190,12 +210,79 @@ its own transaction, because the failed one is aborted.
 
 ---
 
+## ADR-009 — A series books what it can and reports the rest
+
+**Status:** **TEAM-CONFIRMED** · 2026-07-28
+**Context:** A2 #11. A 12-week weekly series where week 7 is already taken.
+Settled now, before recurrence is built, because reversing it later costs a
+`MODIFIED` delta plus a data migration.
+
+**Options considered**
+
+| Option | Verdict |
+|---|---|
+| Book the remaining instances, report the skipped ones | **Chosen** |
+| All-or-nothing — refuse the whole series | Rejected — a user booking a quarter of standups gets nothing because one week collides |
+| A per-request flag | Rejected — doubles the recurrence test matrix and pushes the decision onto a non-technical operator |
+
+**Decision:** partial success with an explicit report of every skipped instance.
+
+**Why:** refusing 11 good bookings over one collision is worse for the user, and
+an explicit skip report keeps the outcome honest rather than silent. The failure
+mode to avoid is not partial success — it is partial success the user cannot see.
+
+**Consequence for the spec:** `add-recurring-bookings` must include a requirement
+that the response enumerates skipped instances with a reason, and a scenario for a
+series where *every* instance collides (which is partial success with zero
+successes — a distinct case worth its own scenario).
+
+---
+
+## ADR-010 — The transactional unit is a plpgsql function, not the Edge Function
+
+**Status:** AGENT-PROPOSED · 2026-07-28 · consequence of ADR-002
+**Context:** `booking-lifecycle` requires an audit event to be written in the same
+transaction as the state change it describes, so that a committed state change
+without its event is impossible. **`supabase-js` exposes no `BEGIN`/`COMMIT`.**
+
+Two `supabase-js` calls — insert the booking, then insert the audit event — can
+commit the first and lose the second. The requirement would be silently violated,
+and only the reconciliation test would ever notice.
+
+**Options considered**
+
+| Option | Verdict |
+|---|---|
+| `book_room()` / `cancel_booking()` as plpgsql functions, called by RPC | **Chosen** — a function body is one implicit transaction |
+| Direct Postgres connection from Deno (`deno-postgres`) | Rejected — works, but abandons the Supabase client, connection pooling and RLS story for one feature |
+| Two client calls plus a compensating delete on failure | Rejected — a compensating write is not atomicity, and the audit log is append-only, so there is nothing to compensate *with* |
+| Relax the requirement | Rejected — the requirement is the point |
+
+**Decision:** plpgsql functions own atomicity. The Edge Function validates and
+translates errors.
+
+**Why it matters beyond this project:** the runtime choice looked like a deploy-
+target decision and turned out to constrain how an invariant could be enforced.
+The spec caught it, because the spec had already committed in writing to
+same-transaction audit writes. Had that requirement been implicit, this would have
+shipped as a rare, unreproducible missing-audit-event bug.
+
+**Two traps recorded so nobody re-introduces them**
+
+1. **No `EXCEPTION` block in `book_room`.** A plpgsql `EXCEPTION` block rolls back
+   the subtransaction, so catching `23P01` there would discard the audit insert
+   too — and swallow the one error the system exists to report. Let it propagate.
+2. **`security definer` is a privilege boundary.** `search_path` is pinned and
+   `execute` is granted to `service_role` only. Granting it to `authenticated`
+   would let the browser call it directly and bypass every validation rule.
+
+---
+
 ## Pending human decisions
 
-| Ref | Question | Agent recommendation |
-|---|---|---|
-| ADR-002 | Node service vs Edge Functions vs direct RPC | Node service |
-| ADR-006 | Accept the three-capability bootstrap exception? | Accept |
-| A2 #11 | Series partial conflict: skip-and-report, or all-or-nothing? | Skip and report |
+None. ADR-002, ADR-006 and ADR-009 were settled on 2026-07-28.
 
-Nothing in `tasks.md` section 1 or later starts until these are settled.
+ADR-010 is a technical consequence of ADR-002 rather than a fresh question, so it
+carries the agent's reasoning and is open to challenge at Phase 3 review along
+with everything else.
+
