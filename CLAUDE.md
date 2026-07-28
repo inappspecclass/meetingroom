@@ -30,6 +30,38 @@ integration. If the spec exceeds ~4 pages, cut features, not rigour.
 - Rule-dense component: recurrence expansion + conflict resolution
 - Integration: booking confirmation / cancellation notification
 
+### Stack (fixed — see `docs/decision-log.md` ADR-001…003)
+
+| Layer | Choice |
+|---|---|
+| Database, auth, hosting | **Supabase** — Postgres 15+, Supabase Auth, RLS |
+| Frontend | **React** + TypeScript + Vite; reads Supabase directly under RLS |
+| Write path | **Supabase Edge Functions** (Deno + TypeScript); holds the service-role key, owns **all** writes |
+| Transactional core | **plpgsql functions** (`book_room`, `cancel_booking`, `log_rejection`) called by RPC |
+| Tests | Vitest + `fast-check`, `deno test` for function units, local Supabase stack |
+
+Deno, not Node — no Node built-ins or native addons. `npm:` specifiers plus a
+`deno.json` import map let the shared zod schema read identically in both runtimes.
+
+**INV-1 is a database constraint, not application code:**
+
+```sql
+exclude using gist (room_id with =, during with &&) where (status = 'active')
+```
+
+`during` is a generated `tstzrange` built with `'[)'` — the half-open decision
+lives in the schema, so back-to-back bookings cannot collide. Postgres raises
+SQLSTATE `23P01`, which the API maps to `409 SLOT_TAKEN`.
+
+**Therefore the create path performs exactly one `rpc('book_room')` call.** No
+pre-flight overlap query. A pre-flight check is dead code that implies a guarantee
+it cannot give, and invites future code to trust it.
+
+**`supabase-js` has no transaction.** That is why booking-plus-audit lives inside
+a plpgsql function body rather than in two client calls — two calls can commit the
+booking and lose the event. And **no `EXCEPTION` block in `book_room`**: catching
+`23P01` there would roll back the audit insert too. Let it propagate.
+
 ---
 
 ## 2. The app is the vehicle. The process is the deliverable.
