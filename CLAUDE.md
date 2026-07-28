@@ -30,6 +30,29 @@ integration. If the spec exceeds ~4 pages, cut features, not rigour.
 - Rule-dense component: recurrence expansion + conflict resolution
 - Integration: booking confirmation / cancellation notification
 
+### Stack (fixed — see `docs/decision-log.md` ADR-001…003)
+
+| Layer | Choice |
+|---|---|
+| Database, auth, hosting | **Supabase** — Postgres 15+, Supabase Auth, RLS |
+| Frontend | **React** + TypeScript + Vite; reads Supabase directly under RLS |
+| Backend | **Node.js** + TypeScript + Fastify; holds the service-role key, owns **all** writes |
+| Tests | Vitest, `fast-check` for property tests, local Supabase stack |
+
+**INV-1 is a database constraint, not application code:**
+
+```sql
+exclude using gist (room_id with =, during with &&) where (status = 'active')
+```
+
+`during` is a generated `tstzrange` built with `'[)'` — the half-open decision
+lives in the schema, so back-to-back bookings cannot collide. Postgres raises
+SQLSTATE `23P01`, which the API maps to `409 SLOT_TAKEN`.
+
+**Therefore `POST /bookings` performs exactly one insert.** No pre-flight overlap
+query. A pre-flight check is dead code that implies a guarantee it cannot give,
+and invites future code to trust it.
+
 ---
 
 ## 2. The app is the vehicle. The process is the deliverable.
